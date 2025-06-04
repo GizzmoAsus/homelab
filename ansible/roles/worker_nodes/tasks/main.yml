@@ -1,0 +1,9 @@
+---
+- name: Check if node has already joined the cluster (e.g., kubelet.conf exists)
+  stat:
+    path: /etc/kubernetes/kubelet.conf
+  register: kubelet_conf
+
+- name: Join worker node to Kubernetes cluster
+  command: "{{ hostvars[groups['control_plane'][0]]['worker_join_command'] }} --cri-socket=unix:///var/run/containerd/containerd.sock"
+  when: not kubelet_conf.stat.exists and hostvars[groups['control_plane'][0]]['worker_join_command'] is defined

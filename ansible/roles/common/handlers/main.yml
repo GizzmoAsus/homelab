@@ -1,0 +1,21 @@
+- name: Reboot node if kernel modules changed
+  ansible.builtin.reboot:
+    msg: "Rebooting node to apply kernel module changes or updates."
+    connect_timeout: 5
+    reboot_timeout: 300 # 5 minutes, adjust as needed
+    pre_reboot_delay: 0
+    post_reboot_delay: 60 # Wait 60 seconds after reboot before trying to connect
+    test_command: uptime # Command to test if reboot was successful
+  become: yes
+
+- name: Enable kubelet
+  systemd:
+    name: kubelet
+    enabled: yes
+
+- name: Restart containerd
+  ansible.builtin.systemd:
+    name: containerd
+    state: restarted
+    enabled: yes
+    daemon_reload: yes

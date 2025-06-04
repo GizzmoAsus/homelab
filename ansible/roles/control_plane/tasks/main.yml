@@ -1,0 +1,70 @@
+---
+- name: Check if Kubernetes cluster is already initialized
+  stat:
+    path: /etc/kubernetes/admin.conf
+  register: k8s_admin_conf
+
+- name: Initialise Kubernetes control plane with kubeadm
+  command: >-
+    kubeadm init
+    --pod-network-cidr={{ pod_network_cidr }}
+    --service-cidr={{ service_cidr }}
+    --kubernetes-version=v{{ kubernetes_version }}
+    --control-plane-endpoint={{ control_plane_endpoint_ip }}
+    --apiserver-advertise-address={{ ansible_host }}
+    --cri-socket=unix:///var/run/containerd/containerd.sock
+  when: not k8s_admin_conf.stat.exists
+  register: kubeadm_init_result
+
+- name: Display kubeadm init output
+  debug:
+    var: kubeadm_init_result.stdout
+  when: kubeadm_init_result.changed
+
+- name: Create .kube directory for the ansible_user
+  file:
+    path: "/home/{{ ansible_user }}/.kube"
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}" # Or user's primary group
+    mode: '0755'
+  when: k8s_admin_conf.stat.exists or kubeadm_init_result.changed
+
+- name: Copy admin.conf to user's .kube directory
+  copy:
+    src: /etc/kubernetes/admin.conf
+    dest: "/home/{{ ansible_user }}/.kube/config"
+    remote_src: yes
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: '0600'
+  when: k8s_admin_conf.stat.exists or kubeadm_init_result.changed
+
+- name: Wait for API server to be fully responsive (optional quick test)
+  ansible.builtin.pause:
+    seconds: 10 # Wait 10 seconds
+  when: kubeadm_init_result.changed
+
+- name: Apply CNI network plugin
+  become: no # Run as the ansible_user who now has admin.conf
+  command: "kubectl --kubeconfig /home/{{ ansible_user }}/.kube/config apply -f {{ cni_manifest_url }}"
+  register: cni_apply_result
+  changed_when: cni_apply_result.rc == 0
+  failed_when: cni_apply_result.rc != 0
+  when: k8s_admin_conf.stat.exists or kubeadm_init_result.changed
+  # Add a check to see if CNI is already applied for idempotency
+
+- name: Generate token and get join command for worker nodes
+  command: kubeadm token create --print-join-command
+  register: kubeadm_join_command_result
+  when: k8s_admin_conf.stat.exists or kubeadm_init_result.changed
+
+- name: Store worker join command
+  set_fact:
+    worker_join_command: "{{ kubeadm_join_command_result.stdout }}"
+  when: kubeadm_join_command_result.changed
+
+- name: Display worker join command (for manual use if needed)
+  debug:
+    msg: "Worker join command: {{ worker_join_command }}"
+  when: worker_join_command is defined

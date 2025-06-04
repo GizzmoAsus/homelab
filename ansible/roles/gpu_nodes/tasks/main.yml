@@ -1,0 +1,105 @@
+# roles/gpu_nodes/tasks/main.yml
+---
+- name: Ensure common prerequisites are done (if this role runs independently)
+  ansible.builtin.include_role:
+    name: common
+  when: "'common_done' not in hostvars[inventory_hostname]" # Example conditional include
+
+- name: Enable CRB repository (if not done in common or specifically for GPU build tools)
+  command: dnf config-manager --set-enabled crb
+  args:
+    warn: false
+  changed_when: false
+  when: ansible_os_family == "RedHat"
+
+- name: Add NVIDIA CUDA RHEL9/AlmaLinux repository
+  command: dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel9/x86_64/cuda-rhel9.repo
+  args:
+    creates: /etc/yum.repos.d/cuda-rhel9-x86_64.repo # Check actual filename created
+  when: ansible_os_family == "RedHat"
+
+- name: Install kernel headers and development packages for NVIDIA driver
+  dnf:
+    name:
+      - kernel-devel-{{ ansible_kernel }} # kernel-devel-matched might not always work if kernel was just updated
+      - kernel-headers-{{ ansible_kernel }}
+      - gcc
+      - make
+      - dkms # If using DKMS drivers
+    state: present
+  when: ansible_os_family == "RedHat"
+
+- name: Enable NVIDIA driver latest DKMS module stream
+  command: dnf module enable -y nvidia-driver:latest-dkms # The '-y' might be needed if it prompts
+  changed_when: true # This command implies a change if it runs
+  when: ansible_os_family == "RedHat"
+  # Consider checking if already enabled to make it idempotent
+
+- name: Install NVIDIA CUDA drivers (includes driver, toolkit might be separate or bundled)
+  dnf:
+    name:
+      - cuda-drivers # This should pull in the driver version enabled by the module stream
+      # - nvidia-driver-cuda # Often pulled by cuda-drivers or part of CUDA Toolkit install
+      # - kmod-nvidia-latest-dkms # Should be pulled by cuda-drivers if using latest-dkms module
+    state: present
+  when: ansible_os_family == "RedHat"
+  notify: Reboot node after NVIDIA driver install # Handler needed
+
+# CUDA Toolkit Installation (can be large, install if you need nvcc and full toolkit on nodes)
+# Often for K8s, only the drivers and container toolkit are strictly needed on the node,
+# and CUDA toolkit is within the containers.
+- name: Install CUDA Toolkit (optional, consider if needed on host vs. in container)
+  dnf:
+    name: cuda-toolkit # Or a specific version like cuda-toolkit-12-5
+    state: present
+  when: ansible_os_family == "RedHat" # and install_cuda_toolkit_on_host | default(false)
+
+- name: Install NVIDIA GDS (GPUDirect Storage - if needed for your workloads)
+  dnf:
+    name: nvidia-gds
+    state: present
+  when: ansible_os_family == "RedHat" # and install_nvidia_gds | default(false)
+
+# NVIDIA Container Toolkit Installation
+- name: Configure NVIDIA Container Toolkit repository
+  command: "{{ item }}"
+  loop:
+    - curl -s -L https://nvidia.github.io/libnvidia-container/stable/rpm/nvidia-container-toolkit.repo | sudo tee /etc/yum.repos.d/nvidia-container-toolkit.repo
+  args:
+    warn: false # curl | sudo tee might not be idempotent easily this way
+    creates: /etc/yum.repos.d/nvidia-container-toolkit.repo # Check filename
+  when: ansible_os_family == "RedHat"
+
+- name: Install NVIDIA Container Toolkit
+  dnf:
+    name: nvidia-container-toolkit
+    state: present
+  when: ansible_os_family == "RedHat"
+  notify: Configure and restart containerd for NVIDIA # Handler needed
+
+# After all installations and configurations that require it:
+- name: Meta task to handle reboot if notified
+  meta: flush_handlers # Run notified handlers like reboots
+
+# This task assumes the node has been rebooted and containerd is restarted
+# if necessary by handlers.
+- name: Join GPU worker node to Kubernetes cluster (if not handled by a generic worker role)
+  ansible.builtin.include_role:
+    name: worker_nodes # Assuming worker_nodes role has the join logic
+  # Or include the join tasks directly here:
+  # - name: Check if GPU node has already joined the cluster
+  #   stat:
+  #     path: /etc/kubernetes/kubelet.conf
+  #   register: gpu_kubelet_conf
+  # - name: Join GPU worker node to Kubernetes cluster
+  #   command: "{{ hostvars[groups['control_plane'][0]]['worker_join_command'] }} --cri-socket=unix:///var/run/containerd/containerd.sock" # Add any GPU specific taints or labels here if needed via kubeadm join
+  #   when: not gpu_kubelet_conf.stat.exists and hostvars[groups['control_plane'][0]]['worker_join_command'] is defined
+
+- name: Label GPU node for Kubernetes
+  command: >
+    kubectl label node {{ inventory_hostname }}
+    nvidia.com/gpu=true
+    --overwrite
+  delegate_to: "{{ groups['control_plane'][0] }}" # Run this kubectl command from the control plane
+  run_once: false # Run for each GPU host in the loop if this play targets gpu_workers
+  when: "'already_labelled_gpu' not in hostvars[inventory_hostname]" # Simple idempotency

@@ -1,0 +1,14 @@
+# group_vars/k8s_cluster.yml
+kubernetes_version: "1.33.0" # Verify latest stable, e.g., "1.30.1-00" for apt/yum
+kubernetes_version_minor: "{{ kubernetes_version.split('.')[0] }}.{{ kubernetes_version.split('.')[1] }}"
+# For Calico, a common CIDR. Cilium might use different ones or not require one in kubeadm if using certain modes.
+pod_network_cidr: "10.244.0.0/16" # Example for Calico. Adjust if using a different CNI.
+service_cidr: "10.96.0.0/12" # Kubeadm default
+control_plane_endpoint_ip: "192.168.0.210" # IP of your k8s-cp01
+
+# CNI manifest URL (Example for Calico - always get the latest from their docs)
+cni_manifest_url: "https://raw.githubusercontent.com/projectcalico/calico/v3.30.1/manifests/calico.yaml"
+# For Cilium, you'd use their specific Helm chart or manifest.
+
+# NVIDIA drivers (for gpu_nodes role) - placeholder, actual installation is complex
+nvidia_driver_version: "570.153.02" # Check appropriate driver for your RTX 2000 Ada
