@@ -7,3 +7,23 @@
 - name: Join worker node to Kubernetes cluster
   command: "{{ hostvars[groups['control_plane'][0]]['worker_join_command'] }} --cri-socket=unix:///var/run/containerd/containerd.sock"
   when: not kubelet_conf.stat.exists and hostvars[groups['control_plane'][0]]['worker_join_command'] is defined
+
+- name: Ensure serverTLSBootstrap is enabled in kubelet config
+  ansible.builtin.lineinfile:
+    path: /var/lib/kubelet/config.yaml
+    regexp: '^serverTLSBootstrap:'
+    line: 'serverTLSBootstrap: true'
+    insertafter: EOF
+    state: present
+    backup: yes
+  notify: Restart kubelet
+
+- name: Ensure rotateCertificates is enabled in kubelet config
+  ansible.builtin.lineinfile:
+    path: /var/lib/kubelet/config.yaml
+    regexp: '^rotateCertificates:'
+    line: 'rotateCertificates: true'
+    insertafter: EOF
+    state: present
+    backup: yes
+  notify: Restart kubelet

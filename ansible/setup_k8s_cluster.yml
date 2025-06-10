@@ -1,76 +1,28 @@
 ---
-- name: Reset Kubernetes Cluster Nodes (USE WITH CAUTION)
-  hosts: k8s_cluster # Target all nodes in your Kubernetes cluster group
-  become: yes
-  tags:
-    - reset_k8s
-    - never
-  tasks:
-    - name: Display warning before resetting nodes
-      ansible.builtin.pause:
-        prompt: |
-          WARNING: You are about to run 'kubeadm reset' on the targeted nodes.
-          This will tear down Kubernetes components and should only be done if you intend
-          to re-initialize the cluster or nodes.
-          Press Enter to continue, or Ctrl+C then 'A' to abort.
-      tags:
-        - reset_k8s
-        - never
-
-    - name: Reset Kubernetes components using kubeadm
-      ansible.builtin.command: "kubeadm reset -f --cri-socket=unix:///var/run/containerd/containerd.sock"
-      register: kubeadm_reset_result
-      # Consider 'changed' if stdout indicates actual removal actions.
-      # This is still a heuristic and depends on kubeadm's output.
-      # If kubeadm reset doesn't have clear "I did something" messages,
-      # it might be acceptable for this task to report changed if rc=0,
-      # as "reset" is an action towards a desired state.
-      # For now, let's make it more conservative:
-      changed_when: >
-        ("Removed folder" in kubeadm_reset_result.stdout or
-         "Unmounted" in kubeadm_reset_result.stdout or
-         "removed ca certificate" in kubeadm_reset_result.stdout) # Add other positive indicators if known
-      # More robust failed_when to allow common non-fatal stderr messages from reset on a clean node:
-      failed_when: >
-        kubeadm_reset_result.rc != 0 and
-        not ('Neither /etc/kubernetes/admin.conf nor /etc/kubernetes/kubelet.conf exists' in kubeadm_reset_result.stderr or
-             '[reset] Couldn\'t unmount target /var/lib/kubelet' in kubeadm_reset_result.stderr or
-             'failed to remove directory' in kubeadm_reset_result.stderr or # Allow this as non-fatal
-             'No such file or directory' in kubeadm_reset_result.stderr) # Allow this too
-      tags:
-        - reset_k8s
-        - never
-
-    - name: Clean up additional Kubernetes/CNI directories (use with caution)
-      ansible.builtin.file:
-        path: "{{ item }}"
-        state: absent
-      loop:
-        - /etc/cni/net.d # CNI configurations
-        - /var/lib/etcd  # etcd data directory (ONLY on control plane if it's the sole etcd member)
-        - $HOME/.kube    # User's kubeconfig (run with become: no and user context if targeting user home)
-                         # Or more specifically /home/{{ ansible_user }}/.kube
-      become: yes # Most of these require sudo
-      tags:
-        - reset_k8s
-        - never
-
 - name: Prepare all nodes for Kubernetes
   hosts: k8s_cluster
   roles:
-    - role: common
+  - role: common
+  tags:
+  - configure_k8s
 
 - name: Initialise Kubernetes Control Plane
   hosts: control_plane
   roles:
-    - role: control_plane
+  - role: control_plane
+  tags:
+  - configure_control_plane
 
-- name: Join CPU Worker Nodes to the Cluster
+- name: Join CPU and GPU Worker Nodes to the Cluster
   hosts: workers
   roles:
-    - role: worker_nodes
+  - role: worker_nodes
+  tags:
+  - configure_workers
 
-# - name: Setup GPU Worker Nodes and Join to Cluster
-#   hosts: gpu_workers
-#   roles:
-#     - role: gpu_nodes
+- name: Setup GPU Worker Nodes and Join to Cluster
+  hosts: gpu_workers
+  roles:
+  - role: gpu_nodes
+  tags:
+  - configure_gpu_workers

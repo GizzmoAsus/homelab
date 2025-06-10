@@ -1,8 +1,9 @@
 ---
+# AlmaLinux/Rocky 10 (RedHat family) tasks
 - name: Enable CRB repository (AlmaLinux/Rocky 10)
   command: dnf config-manager --set-enabled crb
   changed_when: false
-  when: ansible_os_family == "RedHat"
+  when: ansible_os_family == "RedHat" and (ansible_distribution == "AlmaLinux" or ansible_distribution == "Rocky")
 
 - name: Install EPEL Release for AlmaLinux 10
   dnf:
@@ -11,11 +12,19 @@
     disable_gpg_check: yes
   when: ansible_os_family == "RedHat"
 
+- name: Add Docker CE YUM repo (AlmaLinux)
+  get_url:
+    url: https://download.docker.com/linux/centos/docker-ce.repo
+    dest: /etc/yum.repos.d/docker-ce.repo
+    mode: '0644'
+  when: ansible_os_family == "RedHat"
+
 - name: Set SELinux to permissive mode (runtime)
   ansible.builtin.command: setenforce 0
   become: yes
   changed_when: false
   failed_when: false
+  when: ansible_os_family == "RedHat"
 
 - name: Persistently set SELinux to permissive mode in config
   ansible.builtin.lineinfile:
@@ -24,6 +33,7 @@
     line: 'SELINUX=permissive'
     state: present
   become: yes
+  when: ansible_os_family == "RedHat"
 
 - name: Install kernel-modules-extra for the current kernel version
   ansible.builtin.dnf:
@@ -33,6 +43,144 @@
   when: ansible_os_family == "RedHat"
   notify: Reboot node if kernel modules changed
 
+# AlmaLinux/Rocky 10 (RedHat family) containerd setup
+- name: Install containerd.io (AlmaLinux)
+  dnf:
+    name: containerd.io
+    state: present
+    update_cache: yes
+  when: ansible_os_family == "RedHat"
+
+- name: Create containerd config directory (AlmaLinux)
+  file:
+    path: /etc/containerd
+    state: directory
+  when: ansible_os_family == "RedHat"
+
+- name: Generate default containerd config to /etc/containerd/config.toml (AlmaLinux)
+  command: containerd config default
+  register: containerd_config_default_output_alma
+  changed_when: false
+  when: ansible_os_family == "RedHat"
+
+- name: Write the default config to file (AlmaLinux)
+  copy:
+    content: "{{ containerd_config_default_output_alma.stdout }}"
+    dest: /etc/containerd/config.toml
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart containerd
+  when: ansible_os_family == "RedHat"
+
+- name: Ensure SystemdCgroup is true in containerd config (AlmaLinux)
+  replace:
+    path: /etc/containerd/config.toml
+    regexp: '^(\s*SystemdCgroup\s*=\s*)false'
+    replace: '\1true'
+  notify: Restart containerd
+  when: ansible_os_family == "RedHat"
+
+- name: Ensure CRI plugin is enabled in containerd config (AlmaLinux)
+  replace:
+    path: /etc/containerd/config.toml
+    regexp: '^(\s*disabled_plugins\s*=\s*\[")cri("\]\s*)$'
+    replace: '\1\2'
+  notify: Restart containerd
+  when: ansible_os_family == "RedHat"
+
+# NFS client support for AlmaLinux 10
+- name: Install NFS client utilities (AlmaLinux)
+  dnf:
+    name: nfs-utils
+    state: present
+  when: ansible_os_family == "RedHat"
+
+# Ubuntu 22.04 (Debian family) tasks
+- name: Update apt cache
+  apt:
+    update_cache: yes
+    cache_valid_time: 3600
+  when: ansible_distribution == "Ubuntu" and ansible_distribution_version is version('22.04', '==')
+
+- name: Install required packages for containerd (Ubuntu)
+  apt:
+    name:
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - gnupg
+      - lsb-release
+    state: present
+  when: ansible_distribution == "Ubuntu" and ansible_distribution_version is version('22.04', '==')
+
+- name: Add Docker GPG key (Ubuntu)
+  apt_key:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    state: present
+  when: ansible_distribution == "Ubuntu" and ansible_distribution_version is version('22.04', '==')
+
+- name: Add Docker repository (Ubuntu)
+  apt_repository:
+    repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu jammy stable"
+    state: present
+    filename: docker
+  when: ansible_distribution == "Ubuntu" and ansible_distribution_version is version('22.04', '==')
+
+- name: Install containerd.io (Ubuntu)
+  apt:
+    name: containerd.io
+    state: present
+    update_cache: yes
+  when: ansible_distribution == "Ubuntu" and ansible_distribution_version is version('22.04', '==')
+
+- name: Create containerd config directory (Ubuntu)
+  file:
+    path: /etc/containerd
+    state: directory
+  when: ansible_distribution == "Ubuntu" and ansible_distribution_version is version('22.04', '==')
+
+- name: Generate default containerd config to /etc/containerd/config.toml (Ubuntu)
+  command: containerd config default
+  register: containerd_config_default_output_ubuntu
+  changed_when: false
+  when: ansible_distribution == "Ubuntu" and ansible_distribution_version is version('22.04', '==')
+
+- name: Write the default config to file (Ubuntu)
+  copy:
+    content: "{{ containerd_config_default_output_ubuntu.stdout }}"
+    dest: /etc/containerd/config.toml
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart containerd
+  when: ansible_distribution == "Ubuntu" and ansible_distribution_version is version('22.04', '==')
+
+- name: Ensure SystemdCgroup is true in containerd config (Ubuntu)
+  replace:
+    path: /etc/containerd/config.toml
+    regexp: '^(\s*SystemdCgroup\s*=\s*)false'
+    replace: '\1true'
+  notify: Restart containerd
+  when: ansible_distribution == "Ubuntu" and ansible_distribution_version is version('22.04', '==')
+
+- name: Ensure CRI plugin is enabled in containerd config (Ubuntu)
+  replace:
+    path: /etc/containerd/config.toml
+    regexp: '^(\s*disabled_plugins\s*=\s*\[")cri("\]\s*)$'
+    replace: '\1\2'
+  notify: Restart containerd
+  when: ansible_distribution == "Ubuntu" and ansible_distribution_version is version('22.04', '==')
+
+# NFS client support for Ubuntu 22.04
+- name: Install NFS client utilities (Ubuntu)
+  apt:
+    name: nfs-common
+    state: present
+    update_cache: yes
+  when: ansible_distribution == "Ubuntu" and ansible_distribution_version is version('22.04', '==')
+
+# Common tasks for both OS families
 - name: Disable swap
   command: swapoff -a
   changed_when: false
@@ -65,84 +213,53 @@
     sysctl_file: /etc/sysctl.d/99-kubernetes-cri.conf
     reload: yes
 
-# Containerd Installation (Example for AlmaLinux/RHEL-based)
-- name: Install containerd prerequisites (AlmaLinux/RHEL)
-  dnf:
+# Kubernetes installation for Ubuntu 22.04
+- name: Add Kubernetes apt key (Ubuntu)
+  apt_key:
+    url: https://pkgs.k8s.io/core:/stable:/v{{ kubernetes_version_minor }}/deb/Release.key
+    state: present
+  when: ansible_distribution == "Ubuntu" and ansible_distribution_version is version('22.04', '==')
+
+- name: Add Kubernetes apt repository (Ubuntu)
+  apt_repository:
+    repo: "deb https://pkgs.k8s.io/core:/stable:/v{{ kubernetes_version_minor }}/deb/ /"
+    state: present
+    filename: kubernetes
+  when: ansible_distribution == "Ubuntu" and ansible_distribution_version is version('22.04', '==')
+
+- name: Install kubelet, kubeadm, kubectl (Ubuntu)
+  apt:
     name:
-      - yum-utils
-      - device-mapper-persistent-data
-      - lvm2
+      - "kubelet={{ kubernetes_version }}-1.1"
+      - "kubeadm={{ kubernetes_version }}-1.1"
+      - "kubectl={{ kubernetes_version }}-1.1"
     state: present
-  when: ansible_os_family == "RedHat"
+    update_cache: yes
+  when: ansible_distribution == "Ubuntu" and ansible_distribution_version is version('22.04', '==')
+  notify: Enable kubelet
 
-- name: Add Docker CE repository (for containerd dependencies often) (AlmaLinux/RHEL)
-  command: yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
-  args:
-    creates: /etc/yum.repos.d/docker-ce.repo
-  when: ansible_os_family == "RedHat"
+- name: Hold Kubernetes package versions (Ubuntu)
+  ansible.builtin.command: "apt-mark hold {{ item }}"
+  loop:
+    - kubelet
+    - kubeadm
+    - kubectl
+  when: ansible_distribution == "Ubuntu" and ansible_distribution_version is version('22.04', '==')
 
-- name: Install containerd.io
-  dnf:
-    name: containerd.io
-    state: present
-
-- name: Create containerd config directory
-  file:
-    path: /etc/containerd
-    state: directory
-
-- name: Generate default containerd config
-  ansible.builtin.command: containerd config default
-  register: containerd_default_config
-  changed_when: false
-
-- name: Generate default containerd config to /etc/containerd/config.toml
-  ansible.builtin.command: containerd config default
-  register: containerd_config_default_output
-  changed_when: false
-
-- name: Write the default config to file
-  ansible.builtin.copy:
-    content: "{{ containerd_config_default_output.stdout }}"
-    dest: /etc/containerd/config.toml
-    owner: root
-    group: root
-    mode: '0644'
-  notify: Restart containerd
-
-- name: Ensure SystemdCgroup is true in containerd config
-  ansible.builtin.replace:
-    path: /etc/containerd/config.toml
-    # This regex finds 'SystemdCgroup = false' possibly with spaces around '='
-    regexp: '^(\s*SystemdCgroup\s*=\s*)false'
-    replace: '\1true'
-  notify: Restart containerd
-
-- name: Ensure CRI plugin is enabled in containerd config
-  ansible.builtin.replace:
-    path: /etc/containerd/config.toml
-    # This regex specifically targets 'disabled_plugins = ["cri"]'
-    # and changes it to 'disabled_plugins = []'
-    regexp: '^(\s*disabled_plugins\s*=\s*\[")cri("\]\s*)$'
-    replace: '\1\2'
-  notify: Restart containerd
-
-# Kubernetes components installation (Example for AlmaLinux/RHEL YUM repo)
+# Existing RedHat Kubernetes installation tasks remain unchanged
 - name: Add Kubernetes YUM repository (v1.33)
   copy:
     dest: /etc/yum.repos.d/kubernetes.repo
     content: |
       [kubernetes]
       name=Kubernetes
-      # Using the CDN baseurl that pkgs.k8s.io redirected to FOR PACKAGES:
       baseurl=https://prod-cdn.packages.k8s.io/repositories/isv:/kubernetes:/core:/stable:/v{{ kubernetes_version_minor }}/rpm/
       enabled=1
       gpgcheck=1
-      # GPGKey URL from official RHEL instructions and your historical pattern:
-      # This is the key referenced by the repomd.xml metadata.
       gpgkey=https://pkgs.k8s.io/core:/stable:/v{{ kubernetes_version_minor }}/rpm/repodata/repomd.xml.key
       exclude=kubelet kubeadm kubectl cri-tools kubernetes-cni
     mode: '0644'
+  when: ansible_os_family == "RedHat"
 
 - name: Install kubelet, kubeadm, kubectl (AlmaLinux/RHEL)
   dnf:
@@ -157,9 +274,9 @@
 
 - name: Hold Kubernetes package versions (AlmaLinux/RHEL)
   lineinfile:
-    path: /etc/dnf/plugins/versionlock.list # or /etc/yum/pluginconf.d/versionlock.list
+    path: /etc/dnf/plugins/versionlock.list
     regexp: "^{{ item }}-"
-    line: "{{ item }}-{{ kubernetes_version }}.*" # Or more specific lock
+    line: "{{ item }}-{{ kubernetes_version }}.*"
     create: yes
   loop:
     - kubelet
