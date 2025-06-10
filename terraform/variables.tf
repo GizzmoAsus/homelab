@@ -5,7 +5,7 @@ variable "proxmox_api_url" {
 
 variable "proxmox_api_token_id" {
   type        = string
-  description = "Proxmox API Token ID (e.g., terraform-user@pve!mytoken)"
+  description = "Proxmox API Token ID (e.g., example@realm!token-name)"
   sensitive   = true
 }
 
@@ -34,26 +34,32 @@ variable "ssh_public_key" {
 variable "ssh_default_user" {
   description = "Default SSH user for the VMs."
   type        = string
-  default     = "gizzmo"
+  default     = "ssh-username"
 }
 
 variable "ssh_default_user_password" {
   description = "Default SSH user password for the VMs."
   type        = string
-  default     = "gizzmo1234"
+  default     = "changeme-password"
   sensitive   = true
 }
 
 variable "cinit_conf_nameservers" {
   description = "Nameservers for Cloud-Init configuration."
   type        = string
-  default     = "192.168.0.3 1.1.1.1 8.8.8.8"
+  default     = "1.1.1.1 8.8.8.8"
 }
 
 variable "cinit_conf_gateway" {
   description = "Gateway for Cloud-Init configuration."
   type        = string
   default     = "192.168.0.1"
+}
+
+variable "control_plane_count" {
+  description = "Number of control plane nodes."
+  type        = number
+  default     = 1
 }
 
 variable "cpu_worker_count" {

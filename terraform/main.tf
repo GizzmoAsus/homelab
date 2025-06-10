@@ -83,6 +83,7 @@ resource "proxmox_vm_qemu" "nfs-server" {
 }
 
 resource "proxmox_vm_qemu" "k8s_control_plane" {
+  count       = var.control_plane_count
   target_node = var.proxmox_node
   vmid        = 210
   name        = "k8s-control-plane"
@@ -98,16 +99,16 @@ resource "proxmox_vm_qemu" "k8s_control_plane" {
   vm_state    = "running"
 
   # Resource limits
-  cores    = 2
-  sockets  = 1
+  cores    = 4
+  sockets  = 2
   cpu_type = "host"
-  memory   = 8192
+  memory   = 16384
 
   # Cloud-Init configuration
   cicustom   = "vendor=local:snippets/qemu-guest-agent.yml"
   ciupgrade  = true
   nameserver = var.cinit_conf_nameservers
-  ipconfig0  = "ip=192.168.0.210/24,gw=${var.cinit_conf_gateway},ip6=dhcp"
+  ipconfig0  = "ip=192.168.0.21${count.index}/24,gw=${var.cinit_conf_gateway},ip6=dhcp"
   skip_ipv6  = true
   ciuser     = var.ssh_default_user
   cipassword = var.ssh_default_user_password
@@ -122,7 +123,7 @@ resource "proxmox_vm_qemu" "k8s_control_plane" {
       scsi0 {
         disk {
           storage = "local-zfs"
-          size    = "50G"
+          size    = "100G"
           format  = "raw"
         }
       }
@@ -147,8 +148,8 @@ resource "proxmox_vm_qemu" "k8s_control_plane" {
 resource "proxmox_vm_qemu" "k8s_cpu_worker" {
   count       = var.cpu_worker_count
   target_node = var.proxmox_node
-  vmid        = 211 + count.index
-  name        = "k8s-cpu-worker0${count.index + 1}"
+  vmid        = 210 + var.control_plane_count + count.index
+  name        = "k8s-cpu-worker0${count.index + var.control_plane_count}"
   desc        = "Kubernetes CPU Worker Node"
   clone       = var.vm_template_name
   full_clone  = true
@@ -161,16 +162,16 @@ resource "proxmox_vm_qemu" "k8s_cpu_worker" {
   vm_state    = "running"
 
   # Resource limits
-  cores    = 4
+  cores    = 8
   sockets  = 2
   cpu_type = "host"
-  memory   = 16384
+  memory   = 32768
 
   # Cloud-Init configuration
   cicustom   = "vendor=local:snippets/qemu-guest-agent.yml"
   ciupgrade  = true
   nameserver = var.cinit_conf_nameservers
-  ipconfig0  = "ip=192.168.0.21${1 + count.index}/24,gw=${var.cinit_conf_gateway},ip6=dhcp"
+  ipconfig0  = "ip=192.168.0.21${var.control_plane_count + count.index}/24,gw=${var.cinit_conf_gateway},ip6=dhcp"
   skip_ipv6  = true
   ciuser     = var.ssh_default_user
   cipassword = var.ssh_default_user_password
@@ -184,8 +185,8 @@ resource "proxmox_vm_qemu" "k8s_cpu_worker" {
     scsi {
       scsi0 {
         disk {
-          storage = "local-zfs"
-          size    = "50G"
+          storage = "nvme_vm_storage"
+          size    = "200G"
           format  = "raw"
         }
       }
@@ -212,8 +213,8 @@ resource "proxmox_vm_qemu" "k8s_cpu_worker" {
 resource "proxmox_vm_qemu" "k8s_gpu_worker" {
   count       = var.gpu_worker_count
   target_node = var.proxmox_node
-  vmid        = 211 + var.cpu_worker_count + count.index
-  name        = "k8s-gpu-worker0${count.index + var.cpu_worker_count + 1}"
+  vmid        = 210 + var.control_plane_count + var.cpu_worker_count + count.index
+  name        = "k8s-gpu-worker0${var.control_plane_count + var.cpu_worker_count + count.index}"
   desc        = "Kubernetes GPU Worker Node"
   clone       = "tpl-ubuntu-2202"
   full_clone  = true
@@ -226,31 +227,34 @@ resource "proxmox_vm_qemu" "k8s_gpu_worker" {
   vm_state    = "running"
 
   # Resource limits
-  cores    = 6
+  cores    = 8
   sockets  = 2
   cpu_type = "host"
-  memory   = 32768
+  memory   = 65536
 
   # Cloud-Init configuration
   cicustom   = "vendor=local:snippets/qemu-guest-agent.yml"
   ciupgrade  = true
   nameserver = var.cinit_conf_nameservers
-  ipconfig0  = "ip=192.168.0.21${var.cpu_worker_count + 1 + count.index}/24,gw=${var.cinit_conf_gateway},ip6=dhcp"
+  ipconfig0  = "ip=192.168.0.21${var.control_plane_count + var.cpu_worker_count + count.index}/24,gw=${var.cinit_conf_gateway},ip6=dhcp"
   skip_ipv6  = true
   ciuser     = var.ssh_default_user
   cipassword = var.ssh_default_user_password
   sshkeys    = var.ssh_public_key
 
-  serial {
-    id = "0"
-  }
-
   disks {
     scsi {
       scsi0 {
         disk {
-          storage = "local-zfs"
-          size    = "50G"
+          storage = "nvme_vm_storage"
+          size    = "100G"
+          format  = "raw"
+        }
+      }
+      scsi1 {
+        disk {
+          storage = "nvme_vm_storage"
+          size    = "300G"
           format  = "raw"
         }
       }
